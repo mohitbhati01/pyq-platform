@@ -1,0 +1,321 @@
+// This is your Prisma schema file
+// Learn more: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Difficulty {
+  EASY
+  MEDIUM
+  HARD
+}
+
+enum VoteValue {
+  UP
+  DOWN
+}
+
+enum NotificationType {
+  NEW_ANSWER
+  ANSWER_ACCEPTED
+  COMMENT_ON_QUESTION
+  COMMENT_ON_ANSWER
+  MENTION
+  NEW_FOLLOWER
+  QUESTION_UPVOTE
+  ANSWER_UPVOTE
+  BADGE_EARNED
+}
+
+enum ReportStatus {
+  PENDING
+  RESOLVED
+  DISMISSED
+}
+
+enum ReportTargetType {
+  QUESTION
+  ANSWER
+  COMMENT
+  USER
+}
+
+enum VoteTargetType {
+  QUESTION
+  ANSWER
+}
+
+model User {
+  id            String   @id @default(uuid())
+  username      String   @unique
+  email         String   @unique
+  passwordHash  String?  @map("password_hash")
+  googleId      String?  @unique @map("google_id")
+  name          String
+  bio           String?
+  avatarUrl     String?  @map("avatar_url")
+  skills        String[] @default([])
+  subjects      String[] @default([])
+  education     String?
+  reputation    Int      @default(0)
+  isBanned      Boolean  @default(false) @map("is_banned")
+  isAdmin       Boolean  @default(false) @map("is_admin")
+  emailVerified Boolean  @default(false) @map("email_verified")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  questions      Question[]
+  answers        Answer[]
+  comments       Comment[]
+  votes          Vote[]
+  bookmarks      Bookmark[]
+  followers      Follow[]         @relation("following")
+  following      Follow[]         @relation("follower")
+  notifications  Notification[]   @relation("recipient")
+  actorNotifs    Notification[]   @relation("actor")
+  badges         UserBadge[]
+  reports        Report[]         @relation("reporter")
+  refreshTokens  RefreshToken[]
+  commentLikes   CommentLike[]
+
+  @@map("users")
+  @@index([username])
+  @@index([email])
+  @@index([reputation(sort: Desc)])
+}
+
+model RefreshToken {
+  id        String   @id @default(uuid())
+  token     String   @unique
+  userId    String   @map("user_id")
+  expiresAt DateTime @map("expires_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("refresh_tokens")
+  @@index([userId])
+}
+
+model Question {
+  id          String     @id @default(uuid())
+  authorId    String     @map("author_id")
+  title       String
+  description String
+  tags        String[]   @default([])
+  examName    String     @map("exam_name")
+  examYear    Int        @map("exam_year")
+  difficulty  Difficulty @default(MEDIUM)
+  viewCount   Int        @default(0) @map("view_count")
+  voteScore   Int        @default(0) @map("vote_score")
+  isDeleted   Boolean    @default(false) @map("is_deleted")
+  createdAt   DateTime   @default(now()) @map("created_at")
+  updatedAt   DateTime   @updatedAt @map("updated_at")
+
+  author    User              @relation(fields: [authorId], references: [id])
+  answers   Answer[]
+  comments  Comment[]
+  images    QuestionImage[]
+  bookmarks Bookmark[]
+  votes     Vote[]
+
+  @@map("questions")
+  @@index([authorId])
+  @@index([examName, examYear])
+  @@index([difficulty])
+  @@index([voteScore(sort: Desc)])
+  @@index([createdAt(sort: Desc)])
+  // NOTE: A GIN index is needed for efficient array queries on `tags`.
+  // Run migration: CREATE INDEX questions_tags_gin ON questions USING GIN (tags);
+  // The B-tree index below is kept for compatibility but won't be used for hasSome queries.
+  @@index([tags])
+}
+
+model QuestionImage {
+  id         String   @id @default(uuid())
+  questionId String   @map("question_id")
+  url        String
+  publicId   String   @map("public_id")
+  sortOrder  Int      @default(0) @map("sort_order")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  question Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  @@map("question_images")
+  @@index([questionId])
+}
+
+model Answer {
+  id         String   @id @default(uuid())
+  questionId String   @map("question_id")
+  authorId   String   @map("author_id")
+  body       String
+  isAccepted Boolean  @default(false) @map("is_accepted")
+  voteScore  Int      @default(0) @map("vote_score")
+  isDeleted  Boolean  @default(false) @map("is_deleted")
+  editHistory Json[]  @default([]) @map("edit_history")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  question Question  @relation(fields: [questionId], references: [id])
+  author   User      @relation(fields: [authorId], references: [id])
+  comments Comment[]
+  votes    Vote[]
+
+  @@map("answers")
+  @@index([questionId])
+  @@index([authorId])
+  @@index([voteScore(sort: Desc)])
+}
+
+model Comment {
+  id         String   @id @default(uuid())
+  authorId   String   @map("author_id")
+  questionId String?  @map("question_id")
+  answerId   String?  @map("answer_id")
+  parentId   String?  @map("parent_id")
+  body       String
+  likeCount  Int      @default(0) @map("like_count")
+  isDeleted  Boolean  @default(false) @map("is_deleted")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  author   User          @relation(fields: [authorId], references: [id])
+  question Question?     @relation(fields: [questionId], references: [id])
+  answer   Answer?       @relation(fields: [answerId], references: [id])
+  parent   Comment?      @relation("replies", fields: [parentId], references: [id])
+  replies  Comment[]     @relation("replies")
+  likes    CommentLike[]
+
+  @@map("comments")
+  @@index([questionId])
+  @@index([answerId])
+  @@index([parentId])
+  @@index([authorId])
+}
+
+// Per-user comment likes (C-1 fix: proper toggle instead of always-increment)
+model CommentLike {
+  userId    String   @map("user_id")
+  commentId String   @map("comment_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  comment Comment @relation(fields: [commentId], references: [id], onDelete: Cascade)
+
+  @@id([userId, commentId])
+  @@map("comment_likes")
+  @@index([commentId])
+}
+
+model Vote {
+  id         String         @id @default(uuid())
+  userId     String         @map("user_id")
+  targetId   String         @map("target_id")
+  targetType VoteTargetType @map("target_type")
+  value      VoteValue
+  createdAt  DateTime       @default(now()) @map("created_at")
+
+  user     User      @relation(fields: [userId], references: [id])
+  question Question? @relation(fields: [targetId], references: [id], map: "votes_question_fk")
+  answer   Answer?   @relation(fields: [targetId], references: [id], map: "votes_answer_fk")
+
+  @@unique([userId, targetId, targetType])
+  @@map("votes")
+  @@index([targetId, targetType])
+  @@index([userId])
+}
+
+model Follow {
+  followerId  String   @map("follower_id")
+  followingId String   @map("following_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  follower  User @relation("follower", fields: [followerId], references: [id])
+  following User @relation("following", fields: [followingId], references: [id])
+
+  @@id([followerId, followingId])
+  @@map("follows")
+  @@index([followerId])
+  @@index([followingId])
+}
+
+model Bookmark {
+  userId     String   @map("user_id")
+  questionId String   @map("question_id")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  user     User     @relation(fields: [userId], references: [id])
+  question Question @relation(fields: [questionId], references: [id])
+
+  @@id([userId, questionId])
+  @@map("bookmarks")
+  @@index([userId])
+}
+
+model Notification {
+  id           String           @id @default(uuid())
+  recipientId  String           @map("recipient_id")
+  actorId      String           @map("actor_id")
+  type         NotificationType
+  resourceId   String           @map("resource_id")
+  resourceType String           @map("resource_type")
+  isRead       Boolean          @default(false) @map("is_read")
+  createdAt    DateTime         @default(now()) @map("created_at")
+
+  recipient User @relation("recipient", fields: [recipientId], references: [id])
+  actor     User @relation("actor", fields: [actorId], references: [id])
+
+  @@map("notifications")
+  @@index([recipientId, isRead])
+  @@index([recipientId, createdAt(sort: Desc)])
+}
+
+model Badge {
+  id          String      @id @default(uuid())
+  slug        String      @unique
+  name        String
+  description String
+  iconUrl     String?     @map("icon_url")
+  threshold   Int         @default(0)
+  createdAt   DateTime    @default(now()) @map("created_at")
+
+  userBadges UserBadge[]
+
+  @@map("badges")
+}
+
+model UserBadge {
+  userId    String   @map("user_id")
+  badgeId   String   @map("badge_id")
+  awardedAt DateTime @default(now()) @map("awarded_at")
+
+  user  User  @relation(fields: [userId], references: [id])
+  badge Badge @relation(fields: [badgeId], references: [id])
+
+  @@id([userId, badgeId])
+  @@map("user_badges")
+}
+
+model Report {
+  id         String           @id @default(uuid())
+  reporterId String           @map("reporter_id")
+  targetId   String           @map("target_id")
+  targetType ReportTargetType @map("target_type")
+  reason     String
+  status     ReportStatus     @default(PENDING)
+  adminNote  String?          @map("admin_note")
+  createdAt  DateTime         @default(now()) @map("created_at")
+  updatedAt  DateTime         @updatedAt @map("updated_at")
+
+  reporter User @relation("reporter", fields: [reporterId], references: [id])
+
+  @@map("reports")
+  @@index([status])
+  @@index([targetId, targetType])
+}
